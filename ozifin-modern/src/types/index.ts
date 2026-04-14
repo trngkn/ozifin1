@@ -1,3 +1,19 @@
+export interface CustomerCard {
+  id: string;
+  customer_name: string;
+  bank: string;
+  card_type: string;
+  last4: string;
+  expiry_date?: string;
+  payment_date?: number;
+  statement_date?: number;
+  credit_limit?: number;
+  notes?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface User {
   id: string;
   username: string;

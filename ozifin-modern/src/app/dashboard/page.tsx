@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Transaction, DashboardStats, User } from '@/types';
+import { Transaction, DashboardStats, User, CustomerCard } from '@/types';
 import { formatCurrency, formatDate, getGreeting } from '@/lib/utils';
-import { TrendingUp, DollarSign, CreditCard, Activity, Plus } from 'lucide-react';
+import { TrendingUp, DollarSign, CreditCard, Activity, Plus, AlertCircle, Calendar, Clock, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Line } from 'react-chartjs-2';
 import {
@@ -45,14 +45,94 @@ export default function DashboardPage() {
     const [loading, setLoading] = useState(true);
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+    const [pendingPayments, setPendingPayments] = useState<any[]>([]);
 
     useEffect(() => {
         const userData = localStorage.getItem('ozifin_user');
         if (userData) {
             setUser(JSON.parse(userData));
             loadDashboardData(JSON.parse(userData));
+            loadPendingPayments();
         }
     }, [selectedMonth, selectedYear]);
+
+    const loadPendingPayments = async () => {
+        try {
+            const now = new Date();
+            const today = now.getDate();
+
+            // 1. Fetch all customer cards
+            const { data: cards } = await supabase.from('customer_cards').select('*');
+            if (!cards || cards.length === 0) return;
+
+            // 2. Fetch transactions from last 45 days to cover cycles
+            const fortyFiveDaysAgo = new Date();
+            fortyFiveDaysAgo.setDate(now.getDate() - 45);
+
+            const { data: trans } = await supabase
+                .from('transactions')
+                .select('*')
+                .gte('timestamp', fortyFiveDaysAgo.toISOString());
+
+            const transactions = trans || [];
+
+            // 3. Process each card to find pending balances
+            const pending = cards.map(card => {
+                const statementDay = card.statement_date || 1;
+                const paymentDay = card.payment_date || 1;
+
+                // Calculate current cycle start/end
+                let startDate, endDate;
+                if (today >= statementDay) {
+                    startDate = new Date(now.getFullYear(), now.getMonth(), statementDay);
+                    if (statementDay <= paymentDay) {
+                        endDate = new Date(now.getFullYear(), now.getMonth(), paymentDay, 23, 59, 59);
+                    } else {
+                        endDate = new Date(now.getFullYear(), now.getMonth() + 1, paymentDay, 23, 59, 59);
+                    }
+                } else {
+                    startDate = new Date(now.getFullYear(), now.getMonth() - 1, statementDay);
+                    if (statementDay <= paymentDay) {
+                        endDate = new Date(now.getFullYear(), now.getMonth() - 1, paymentDay, 23, 59, 59);
+                    } else {
+                        endDate = new Date(now.getFullYear(), now.getMonth(), paymentDay, 23, 59, 59);
+                    }
+                }
+
+                // Sum transactions for this card in this cycle
+                const paidAmount = transactions
+                    .filter(t => 
+                        t.customer === card.customer_name && 
+                        t.bank === card.bank && 
+                        t.last4 === card.last4 &&
+                        new Date(t.timestamp) >= startDate &&
+                        new Date(t.timestamp) <= endDate
+                    )
+                    .reduce((sum, t) => sum + Number(t.amount), 0);
+
+                const limit = Number(card.credit_limit || 0);
+                const remaining = Math.max(0, limit - paidAmount);
+                
+                // Days remaining
+                const diffTime = endDate.getTime() - now.getTime();
+                const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                return {
+                    ...card,
+                    paidAmount,
+                    remaining,
+                    daysLeft,
+                    isFullyPaid: limit > 0 ? paidAmount >= limit : paidAmount > 0
+                };
+            })
+            .filter(p => !p.isFullyPaid && p.daysLeft >= -2 && p.daysLeft <= 15) // Show only unpaid cards due within 15 days
+            .sort((a, b) => a.daysLeft - b.daysLeft);
+
+            setPendingPayments(pending);
+        } catch (error) {
+            console.error('Error loading pending payments:', error);
+        }
+    };
 
     const loadDashboardData = async (currentUser: User) => {
         setLoading(true);
@@ -240,14 +320,108 @@ export default function DashboardPage() {
                     value={stats.transactionCount.toString()}
                     icon={<CreditCard className="w-6 h-6" />}
                     color="from-purple-500 to-pink-500"
+                    onClick={() => router.push('/dashboard/transactions')}
                 />
                 <StatCard
-                    title="Lợi nhuận TB"
-                    value={formatCurrency(stats.avgProfit)}
-                    icon={<Activity className="w-6 h-6" />}
+                    title="Thẻ khách hàng"
+                    value="Quản lý thẻ"
+                    icon={<Plus className="w-6 h-6" />}
                     color="from-orange-500 to-red-500"
+                    onClick={() => router.push('/dashboard/customer-cards')}
                 />
             </div>
+
+            {/* Pending Payments Section */}
+            {pendingPayments.length > 0 && (
+                <div className="bg-white rounded-3xl shadow-xl shadow-indigo-100/20 border border-indigo-50 p-6 md:p-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600">
+                                <AlertCircle className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-black text-gray-800 uppercase tracking-tight">Thẻ Cần Thanh Toán</h2>
+                                <p className="text-sm text-gray-500 font-medium">Danh sách thẻ đang đến hạn ({pendingPayments.length} thẻ)</p>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={() => router.push('/dashboard/customer-cards')}
+                            className="text-indigo-600 hover:text-indigo-700 font-bold text-sm flex items-center gap-1 group"
+                        >
+                            Xem tất cả thẻ <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                        </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                        {pendingPayments.map((card) => {
+                            const isUrgent = card.daysLeft <= 0;
+                            const isWarning = card.daysLeft > 0 && card.daysLeft <= 3;
+                            
+                            const cardColor = isUrgent 
+                                ? 'bg-rose-50 border-rose-100 hover:border-rose-300' 
+                                : isWarning 
+                                    ? 'bg-amber-50 border-amber-100 hover:border-amber-300' 
+                                    : 'bg-slate-50 border-slate-100 hover:border-indigo-200';
+
+                            const iconColor = isUrgent ? 'text-rose-500' : isWarning ? 'text-amber-500' : 'text-indigo-500';
+                            const badgeColor = isUrgent 
+                                ? 'bg-rose-500 text-white' 
+                                : isWarning 
+                                    ? 'bg-amber-100 text-amber-700' 
+                                    : 'bg-indigo-100 text-indigo-700';
+
+                            return (
+                                <div 
+                                    key={card.id} 
+                                    onClick={() => router.push(`/dashboard/transactions/new?customer=${encodeURIComponent(card.customer_name)}&bank=${encodeURIComponent(card.bank)}&card_type=${encodeURIComponent(card.card_type)}&last4=${card.last4}&amount=${card.remaining}&type=Đáo`)}
+                                    className={`p-3.5 rounded-[1.5rem] border-2 transition-all hover:shadow-md cursor-pointer active:scale-95 flex flex-col justify-between group ${cardColor}`}
+                                >
+                                    <div className="space-y-3">
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm shrink-0">
+                                                    <CreditCard className={`w-4 h-4 ${iconColor}`} />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <div className="font-black text-gray-800 uppercase text-[11px] leading-tight truncate">{card.customer_name}</div>
+                                                    <div className="text-[9px] font-bold text-gray-400 uppercase tracking-tight truncate">{card.bank} • {card.last4}</div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-white/60 rounded-xl p-2.5 space-y-2">
+                                            <div className="flex justify-between items-center text-[10px]">
+                                                <span className="text-gray-400 font-bold uppercase">Cần đáo</span>
+                                                <span className="font-black text-gray-800">{formatCurrency(card.credit_limit || 0)}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center text-[10px]">
+                                                <span className="text-gray-400 font-bold uppercase">Đã làm</span>
+                                                <span className="font-black text-emerald-600">{formatCurrency(card.paidAmount)}</span>
+                                            </div>
+                                            <div className="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+                                                <div 
+                                                    className={`h-full transition-all duration-1000 ${isUrgent ? 'bg-rose-500' : isWarning ? 'bg-amber-500' : 'bg-indigo-500'}`}
+                                                    style={{ width: `${Math.min((card.paidAmount / (card.credit_limit || 1)) * 100, 100)}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+                                        <div className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${badgeColor}`}>
+                                            <Clock className="w-2.5 h-2.5" />
+                                            {card.daysLeft < 0 ? 'Quá hạn' : card.daysLeft === 0 ? 'Hôm nay' : `${card.daysLeft} ngày`}
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="text-[12px] font-black text-rose-600 leading-none">{formatCurrency(card.remaining)}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -351,14 +525,19 @@ function StatCard({
     value,
     icon,
     color,
+    onClick
 }: {
     title: string;
     value: string;
     icon: React.ReactNode;
     color: string;
+    onClick?: () => void;
 }) {
     return (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-shadow">
+        <div 
+            onClick={onClick}
+            className={`bg-white rounded-2xl shadow-sm border border-gray-200 p-6 hover:shadow-lg transition-all ${onClick ? 'cursor-pointer hover:border-indigo-300 active:scale-95' : ''}`}
+        >
             <div className="flex items-center justify-between mb-4">
                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center text-white shadow-lg`}>
                     {icon}

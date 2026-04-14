@@ -103,6 +103,7 @@ export default function DashboardLayout({
                 <nav className="flex-1 p-4 space-y-2 overflow-y-auto no-scrollbar">
                     <NavLink href="/dashboard" icon="📊" label="Tổng quan" />
                     <NavLink href="/dashboard/transactions" icon="💳" label="Giao dịch" />
+                    <NavLink href="/dashboard/customer-cards" icon="📇" label="Thẻ khách hàng" />
                     {(user.role === 'admin' || user.role === 'manager') && (
                         <NavLink href="/dashboard/users" icon="👥" label="Người dùng" />
                     )}

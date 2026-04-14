@@ -67,15 +67,33 @@ export default function TransactionFormPage() {
         if (userData) {
             const parsedUser = JSON.parse(userData);
             setUser(parsedUser);
+            
+            // Check for pre-filled data in query params
+            const preCustomer = searchParams.get('customer');
+            const preBank = searchParams.get('bank');
+            const preLast4 = searchParams.get('last4');
+            const preAmount = searchParams.get('amount');
+            const preType = searchParams.get('type') || 'Đáo';
+
             if (!isEdit) {
-                setForm((prev) => ({ ...prev, sale: parsedUser.display_name, created_by: parsedUser.username }));
+                setForm((prev) => ({ 
+                    ...prev, 
+                    sale: parsedUser.display_name, 
+                    created_by: parsedUser.username,
+                    customer: preCustomer || prev.customer,
+                    bank: preBank || prev.bank,
+                    card_type: searchParams.get('card_type') || prev.card_type,
+                    last4: preLast4 || prev.last4,
+                    amount: preAmount ? parseFloat(preAmount) : prev.amount,
+                    type: preType as any
+                }));
             }
             loadSettings();
             if (isEdit) {
                 loadTransaction(params.id as string);
             }
         }
-    }, [isEdit, params]);
+    }, [isEdit, params, searchParams]);
 
     // Auto-calculate amounts
     useEffect(() => {
